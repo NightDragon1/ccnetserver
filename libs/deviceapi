@@ -1,0 +1,560 @@
+-- ### LUA Device API for CC       ### 
+-- ### Version 1.0              ###
+-- ### Autor: NightDragon ###
+
+local version = "1.0"
+
+-- API Version
+function apiver()
+	return version
+end
+
+-- ###### ###### ###### ###### ######
+-- ######        Allgemein     ######
+-- ###### ###### ###### ###### ######
+
+-- Attribute Steam Turbine
+devattr_turbine = {
+	-- Dampf /Tick in mB
+	amount = 0.0,
+	-- Status: on, off, idle
+	status = "on",
+	-- RF/tick
+	production = 0.0,
+	-- RPM Geschwindigkeit
+	speed = 0.0
+}
+
+-- Attribute Steam Boiler 
+devattr_boiler = {
+	-- Treibstoff in mB oder Items (z. Bsp. Kohle)
+	amount = 0.0,
+	-- Status: N/A für boiler
+	status = "N/A",
+	-- Dampf/tick in mB
+	production = 0.0
+}
+
+-- Attribute Ventil 
+devattr_valve = {
+	-- Status: on, off, sig_on (on when signal), sig_off (off when signal) 
+	status = "on",
+	-- Richtung: insert, extration, in/out, disabled
+	direction = "in/out"
+}
+
+-- Attribute Tank/Behälter 
+devattr_tank = {
+	-- Dampf /Tick in mB
+	amount = 0.0
+}
+
+-- Attribute Batterien und Energiezellen
+devattr_bat = {
+	-- Energie gespeichert
+	amount = 0.0
+}
+
+-- Attribute Batterien und Energiezellen
+devattr_simple = {
+	-- Status: on, off
+	status = "on"
+}
+
+-- Attribute Faesser
+devattr_barrel = {
+	-- Stk. Items
+	amount = 0.0
+}
+
+
+local monitor = nil
+local x_size = 0
+local y_size = 0
+
+
+-- ###### ###### ###### ###### ######
+-- ######     Allgemeines      ######
+-- ###### ###### ###### ###### ######
+
+function Runden(num, idp)
+  local mult = 10^(idp or 0)
+  return math.floor(num * mult + 0.5) / mult
+end
+
+
+-- ###### ###### ###### ###### ######
+-- ######        Devices       ######
+-- ###### ###### ###### ###### ######
+
+
+-- Setzt das Attribute eines Geraetes
+function SetAttribute(devside, devattr, devvalue)
+    local status = 0
+    local Device = nil
+    local DeviceType = ""
+    local DeviceAttribute = ""
+    local DeviceValue = nil
+    
+    -- Check DeviceSide
+    if type(devside) == "string" then
+        DeviceType = peripheral.getType(devside)
+        Device = peripheral.wrap(devside)
+    end
+    
+    -- Check Attribute
+    if type(devattr) == "string" then
+        DeviceAttribute = devattr
+    end
+    
+    -- Check Value
+    if type(devvalue) == "string" or type(devvalue) == "number" then
+        DeviceValue = devvalue
+    end
+    
+    if DeviceType == "BigReactors-Turbine" then -- BigReactor Turbine
+        if DeviceAttribute == "Set_Status" then
+            if type(DeviceValue) == "string" then
+                -- Turbine ein, Energie produzieren
+                if DeviceValue == "on" then
+                    Device.setActive(true)
+                    Device.setInductorEngaged(true)
+                -- Turbine aus
+                elseif DeviceValue == "off" then
+                    Device.setActive(false)
+                    Device.setInductorEngaged(false)
+                -- Turbine ein, aber KEIN Energie Produzieren
+                elseif DeviceValue == "idle" then
+                    Device.setActive(true)
+                    Device.setInductorEngaged(false)
+                else
+                    status = 5
+                end
+            else
+                status = 5
+            end
+        elseif DeviceAttribute == "Set_Amount" then
+            if type(DeviceValue) == "number" then
+                if DeviceValue >= 0  and DeviceValue <= Device.getFluidFlowRateMaxMax then
+                    Device.setFluidFlowRateMax(DeviceValue)
+                else
+                   status = 5
+                end
+            else
+                status = 5
+            end
+            
+        else
+            status = 1
+        end
+    elseif DeviceType == "Modem" then -- Modem
+        
+    elseif DeviceType == "Printer" then -- Drucker
+        
+    elseif DeviceType == "Turtle" then -- Turtle
+        
+    elseif DeviceType == "Computer" then -- Computer
+        
+    elseif DeviceType == "Drive" then -- Diskettenlaufwerk
+        
+    elseif DeviceType == "mcp_mobius_betterbarrel" then -- JABBA Berrels und Co
+        
+    else
+       status = 4
+    end
+    return status
+end
+
+-- Status abfragen, Table retourgeben (feedback.status = der normale Status dazu, feedback.value der Wert, wenn Status 0)
+function GetAttribute(devside, devattr)
+    local status = 0
+    local fbvalue = nil
+    local Device = nil
+    local DeviceType = ""
+    local DeviceAttribute = ""
+    
+    -- Check DeviceSide
+    if type(devside) == "string" then
+        DeviceType = peripheral.getType(devside)
+        Device = peripheral.wrap(devside)
+    end
+    
+    -- Check Attribute
+    if type(devattr) == "string" then
+        DeviceAttribute = devattr
+    end    
+
+    if DeviceType == "BigReactors-Turbine" then -- BigReactor Turbine
+        if DeviceAttribute == "Get_Status" then -- Status
+            if Device.getActive() == true and Device.getInductorEngaged() == true then
+                fbvalue = "on"
+            elseif Device.getActive() == true and Device.getInductorEngaged() == false then
+                fbvalue = "idle"
+            elseif Device.getActive() == false then
+                fbvalue = "off"
+            else
+                status = 3
+            end
+        elseif DeviceAttribute == "Get_Output" then -- Energieoutput
+            fbvalue = Device.getEnergyProducedLastTick()
+        elseif DeviceAttribute == "Get_Input" then -- Steaminput
+            fbvalue = Device.getInputAmount()
+        elseif DeviceAttribute == "Get_Stored" then -- Energie gespeichert
+            fbvalue = Device.getEnergyStored()
+        else
+            status = 1
+        end
+    else
+       status = 4
+    end
+    return fbvalue, status
+end
+
+local function DeviceList()
+    local gen_cnt = 0
+    local tank_cnt = 0
+    local boiler_cnt = 0
+    local bat_cnt = 0
+    local mach_cnt = 0
+    
+    -- Liste aller Geraetelisten
+    local devices = {
+        cnt = {},
+        lists = {}
+    }
+    
+    -- Liste aller Generatoren
+    local generator_list = {}
+    
+    -- Liste aller Boiler
+    local boiler_list = {}
+    
+    -- Liste aller Generatoren
+    local tank_list = {}
+    
+    -- Liste aller Akkus und Batterien
+    local battery_list = {}
+
+        -- Liste aller Akkus und Batterien
+    local machine_list = {}
+    
+    local periList = peripheral.getNames() 
+    
+    for i = 1, #periList do
+        local temp
+        local run
+        local st
+        local st2
+        Type = tostring(peripheral.getType(periList[i]))
+        
+        -- ## BigReactors-Turbine
+        if Type == "BigReactors-Turbine" then
+            st = peripheral.call(periList[i], "getActive")
+            prod = peripheral.call(periList[i], "getInductorEngaged")
+            sp = peripheral.call(periList[i], "getRotorSpeed")
+            fueltype = peripheral.call(periList[i], "getInputType")
+            if not fueltype then
+                fueltype = "N/A"
+            end
+            if st and prod and sp > 1600 then
+                temp = "Vollbetrieb"
+            elseif st and prod and sp > 801 then
+                temp = "Teilbetrieb"
+            elseif st and prod and sp <= 800 and not fueltype == "N/A" then
+                temp = "Anlauf"
+            elseif st and not prod then
+                temp = "Idle"
+            elseif st and fueltype == "N/A" then
+                temp = "Idle"
+            else
+                temp = "Inaktiv"
+            end
+            gen_cnt = gen_cnt + 1
+            generator_list[gen_cnt] = {
+                side = tostring(periList[i]),
+                name = Type,
+                devtype = "Generator",
+                values = {
+                    gentype = "Dampfturbine",
+                    speed = Runden(peripheral.call(periList[i], "getRotorSpeed"),2),
+                    output = Runden(peripheral.call(periList[i], "getEnergyProducedLastTick"),2),
+                    fuel = fueltype,
+                    status = temp
+                }
+            }
+        -- ## Steam-Boiler
+        elseif Type == "liquid_fueled_boiler_firebox" then
+            boiler_cnt = boiler_cnt + 1
+            temp = peripheral.call(periList[i], "getTankInfo")
+            st2 = Runden(peripheral.call(periList[i], "getTemperature"),2)
+            run = peripheral.call(periList[i], "isBurning")
+            if not temp[2] then
+                temp[2] = {}
+            end
+            if not temp[2].contents then
+                temp[2].contents = {
+                    amount = 0,
+                    rawName = "N/A",
+                    capacity = 2
+                }
+                st = 0
+            else
+                st = temp[2].capacity/2
+            end
+            
+            if run and st2 > 20 and st2 <= 100 then
+                st = "Anlauf"
+            elseif run and st2 > 100 and temp[2].contents.amount < st then
+                st = "Vorheizen"
+            elseif run and st2 > 100 and st2 <= 800 and temp[2].contents.amount >= st then
+                st = "Teilbetrieb"
+            elseif run and st2 > 800 and temp[2].contents.amount >= st then
+                st = "Vollbetrieb"
+            elseif not run and st2 > 100 then
+                st = "Abkuehlung"
+            elseif not run and st2 <= 100 then
+                st = "Inaktiv"
+            else
+                st = "Fehler!"
+            end
+            boiler_list[boiler_cnt] = {
+                side = tostring(periList[i]),
+                name = Type,
+                devtype = "Boiler",
+                values = {
+                    tanktype = "Dampfkessel",
+                    capacity = temp[2].capacity,
+                    current = temp[2].contents.amount,
+                    temperatur = Runden(peripheral.call(periList[i], "getTemperature"),2),
+                    content = temp[2].contents.rawName,
+                    status = st
+                }
+            }
+         -- ## Eisentank
+        elseif Type == "rcirontankvalvetile" then
+            tank_cnt = tank_cnt + 1
+            temp = peripheral.call(periList[i], "getTankInfo")
+            if temp.contents.amount == 0 then
+                st = 0
+            elseif temp.contents.amount > 0 then
+                st = (100 / temp.capacity) * temp.contents.amount
+                st = tostring(st)
+            else
+                st = -1
+            end
+            tank_list[tank_cnt] = {
+                side = tostring(periList[i]),
+                name = periList[i],
+                devtype = "Tank",
+                values = {
+                    tanktype = "Irontank",
+                    capacity = temp.capacity,
+                    current = temp.contents.amount,
+                    temperatur = 0,
+                    content = temp.contents.rawName,
+                    status = st
+                }
+            }
+        -- ## Stahltank
+        elseif Type == "rcsteeltankvalvetile" then
+            tank_cnt = tank_cnt + 1
+            temp = peripheral.call(periList[i], "getTankInfo")
+            if temp.contents.amount == 0 then
+                st = 0
+            elseif temp.contents.amount > 0 then
+                st = (100 / temp.capacity) * temp.contents.amount
+                st = tostring(st)
+            else
+                st = -1
+            end
+            tank_list[tank_cnt] = {
+                side = tostring(periList[i]),
+                name = periList[i],
+                devtype = "Tank",
+                values = {
+                    tanktype = "Steeltank",
+                    capacity = temp.capacity,
+                    current = temp.contents.amount,
+                    temperatur = 0,
+                    content = temp.contents.rawName,
+                    status = st
+                }
+            }
+        -- ## Endertank
+        elseif Type == "ender_tank" then
+            tank_cnt = tank_cnt + 1
+            temp = peripheral.call(periList[i], "getTankInfo")
+            if temp.contents.amount == 0 then
+                st = 0
+            elseif temp.contents.amount > 0 then
+                st = (100 / temp.capacity) * temp.contents.amount
+                st = tostring(st)
+            else
+                st = -1
+            end
+                tank_list[tank_cnt] = {
+                side = tostring(periList[i]),
+                name = periList[i],
+                devtype = "Tank",
+                values = {
+                    tanktype = "Ender",
+                    capacity = temp.capacity,
+                    current = temp.contents.amount,
+                    temperatur = 0,
+                    content = temp.contents.rawName,
+                    status = st
+                }
+            }
+        -- ## Capacitor / Battery
+        elseif Type == "tile_blockcapacitorbank_name" then
+            bat_cnt = bat_cnt + 1
+            battery_list[bat_cnt] = {
+                side = tostring(periList[i]),
+                name = periList[i],
+                devtype = "Speicher"
+            }
+        -- ## Alle anderen Geraete
+        else
+            mach_cnt = mach_cnt + 1
+            machine_list[mach_cnt] = {
+                side = tostring(periList[i]),
+                name = periList[i],
+                devtype = "Machine"
+            }
+        end
+    end
+    
+    devices.lists[1] = {
+        data = generator_list
+    }    
+    devices.lists[2] = {
+        data = boiler_list
+    }
+    devices.lists[3] = {
+        data = tank_list
+    }
+    devices.lists[4] = {
+        data = battery_list
+    }
+    devices.lists[5] = {
+        data = machine_list
+    }
+    devices.cnt[1] = gen_cnt
+    devices.cnt[2] = boiler_cnt
+    devices.cnt[3] = tank_cnt
+    devices.cnt[4] = bat_cnt
+    devices.cnt[5] = mach_cnt
+    
+    return devices
+end
+
+
+function GetValues(devtype)
+    local devices=DeviceList()
+    
+    if devtype == nil then devtype = "" end
+    
+    if devtype == "Generator" and devices.lists[1] then
+        return devices.lists[1].data
+    elseif devtype == "Boiler" and devices.lists[2] then
+        return devices.lists[2].data
+    elseif devtype == "Tank" and devices.lists[3] then
+        return devices.lists[3].data
+    elseif devtype == "Speicher" and devices.lists[4] then
+        return devices.lists[4].data
+    elseif devtype == "Misc" and devices.lists[5] then
+        return devices.lists[5].data
+    elseif devtype == "All" then
+        return devices
+    end
+    return nil
+end
+
+-- ###### ###### ###### ###### ######
+-- ######        Monitor       ######
+-- ###### ###### ###### ###### ######
+
+-- Monitor intialisieren
+function monitor_init(side)
+    monitor = peripheral.wrap(side)
+    monitor.setTextScale(0.5)
+    monitor_clear(monitor)
+    x_size, y_size = monitor.getSize()
+    return monitor
+end
+
+-- Monitor loeschen und auf Anfang zurueck
+function monitor_clear(screen)
+    screen.clear()
+    screen.setCursorPos(1,1)
+end
+
+-- Text auf Monitor ausgeben
+function monitor_write(screen, text)
+    local x_size,y_size = screen.getSize()
+    local oldx, oldy = screen.getCursorPos()
+    oldy=oldy+1
+    if oldy > y_size+1 then
+       oldy=1
+       monitor_clear(screen)
+       oldy=2
+    end
+    screen.write(text)
+    screen.setCursorPos(1,oldy)
+end
+
+function monitor_tab(screen, content)
+    local numfields = #content+1
+    local fieldsize = math.floor(x_size / numfields)
+    local oldx, oldy = screen.getCursorPos()
+    
+    if content ~= nil and fieldsize > 1 then
+        for i = 0, numfields-1 do
+            screen.setCursorPos(i*fieldsize+1,oldy)
+            monitor_line(screen, content[i+1])
+        end
+    end
+end
+
+function monitor_line(screen, text)
+    screen.write(text)
+end
+
+function monitor_br(screen)
+    local x_size,y_size = screen.getSize()
+    local oldx, oldy = screen.getCursorPos()
+    oldy=oldy+1
+    if oldy > y_size+1 then
+       oldy=1
+       monitor_clear(screen)
+       oldy=2
+    end
+    screen.setCursorPos(1,oldy)   
+end
+
+
+-- ###### ###### ###### ###### ######
+-- ######        RedStone      ######
+-- ###### ###### ###### ###### ######
+
+
+-- Redstone Signal auf Seite ausgeben
+function RedOn(redside)
+    RedSignal(redside,15)
+end
+
+-- Redstone Signal auf Seite deaktivieren
+function RedOff(redside)
+    RedSignal(redside,0)
+end
+
+-- Redstone Pegel auf Seite messen
+function RedGet(redside)
+    local pegel = redstone.getAnalogInput(redside)
+    return pegel
+end
+
+-- Spezifischen RedStone Pegel auf Seite ausgeben
+function RedSignal(redside, redval)
+    redstone.setAnalogOutput(redside,tonumber(redval))
+end

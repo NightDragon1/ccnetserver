@@ -1,0 +1,297 @@
+-- ### LUA Net API for CC       ### 
+-- ### Version 1.0              ###
+-- ### Autor: NightDragon ###
+
+-- ## Interne Variablen
+local version = "1.0"
+local modem = nil -- Modemobjekt
+local modem_channel_r = 0 --Modem Empfangskanal
+local modem_channel_t = 0 --Modem Sendekanal
+local modem_side = "back" -- Modemanschluss (back, left, right, Modem_0, etc...)
+local modem_key = "cy9EuakKYAbgtcNVDuaEt8r8J"
+
+os.loadAPI("/libs/deviceapi")
+
+-- ## Strukturen / Beispiele
+
+updates = true
+
+-- Sendetelegram
+net_msg_t = {
+	sender = "",
+	via = "",
+	dest = "",
+	key = "",
+	cmd = {
+        name = "",
+        p1 = "",
+        p2 = "",
+        p3 = "",
+        p4 = "",
+        p5 = ""
+    }
+}
+
+-- Empfangstelegram
+net_msg_r = {
+	sender = "",
+	via = "",
+	dest = "",
+	key = "",
+	cmd = {
+        name = "",
+        p1 = "",
+        p2 = "",
+        p3 = "",
+        p4 = "",
+        p5 = ""
+    }
+}
+
+-- API Version
+function apiver()
+	return version
+end
+
+-- Telegram via Modem senden
+function modem_send(to,command, par1, par2, par3, par4, par5)
+    local net_msg_t = {
+        sender = tostring(os.getComputerID()),
+        via = tostring(os.getComputerID()),
+        dest = tostring(to),
+        key = modem_key,
+        cmd= {
+            name = command,
+            p1 = par1,
+            p2 = par2,
+            p3 = par3,
+            p4 = par4,
+            p5 = par5
+            }
+    }
+    sleep(0.005)
+	modem.transmit(modem_channel_t, modem_channel_r, net_msg_t)
+end
+
+-- einfache Nachricht via Modem senden
+function modem_send_simple(Antwort)
+	modem.transmit(modem_channel_t,modem_channel_r,Antwort)
+end
+
+function find_modem()
+    local periList = peripheral.getNames()
+    local periside = nil
+    for i = 1, #periList do
+            if peripheral.getType(periList[i]) == "modem" then
+                if periList[i] ~= "bottom" then
+                    periside = periList[i] 
+                end
+            end
+    end
+    return periside
+end
+
+function accept_update(wert)
+    if not wert then
+        updates = true
+    else
+        updates = false
+    end
+end
+
+-- Modem Daten empfangen
+function modem_receive_basic()
+	local event, modemSide, senderChannel, replyChannel, Data , senderDistance = os.pullEvent("modem_message")
+	return Data
+end
+
+-- Handler fuer generische Antworten, der Rest wird durchgereicht
+function modem_receive(handling, passthrough)
+	message = modem_receive_basic()
+	
+	-- Basic Handling von Nachrichten? 
+	if handling then
+		-- Check auf Telegramnachricht
+		if type(message) == "table" and type(message.cmd) == "table" then
+			-- Schluessel stimmt
+            if message.key == modem_key then
+            -- Check ob fuer diesen Teilnehmer
+                if message.dest == tostring(os.getComputerID()) then
+                    -- OS-Version
+                    if message.cmd.name == "getosversion" then
+                        modem_send(message.sender,"reposversion",tostring(os.version()),nil,nil,nil,nil)
+                        
+                    -- Peripherieliste
+                    elseif message.cmd.name == "getperi" then
+                        local periList = peripheral.getNames()
+                        local Peris = {
+                                Cnt = 0,
+                                Device = {}
+                                }
+                        Peris.Cnt = #periList
+                        for i = 1, #periList do
+                            Peris.Device[i] = {
+                                Side = tostring(periList[i]),
+                                Type = tostring(peripheral.getType(periList[i]))
+                                }
+                        end
+                        modem_send(message.sender,"repperi",Peris,nil,nil,nil,nil)
+                        
+                    -- Attribute setzen
+                    elseif message.cmd.name == "orderperichange" then
+                        local status = 0
+                        status = deviceapi.SetAttribute(message.cmd.p1,message.cmd.p2,message.cmd.p3)
+                        -- Feedback senden
+                        modem_send(message.sender,"ackperichange",message.cmd.p1,message.cmd.p2,message.cmd.p3,status,nil)
+                        
+                    -- Attribute abfragen    
+                    elseif message.cmd.name == "getperistats" then
+                        local value = 0
+                        local status = 0
+                        value, status = deviceapi.GetAttribute(message.cmd.p1,message.cmd.p2)
+                        -- Feedback senden
+                        modem_send(message.sender,"repperistats",message.cmd.p1,message.cmd.p2,value,status,nil)
+                    -- Attribute abfragen    
+                    elseif message.cmd.name == "getperival" then
+                        local data = nil
+                        local status = 0
+                        data = deviceapi.GetValues(message.cmd.p1)
+                        -- Feedback senden
+                        modem_send(message.sender,"repperival",message.cmd.p1,data,nil,nil,nil)
+                        
+                    -- Redstone Signal ausgeben
+                    elseif message.cmd.name == "setredsig" then
+                        deviceapi.RedSignal(message.cmd.p1,message.cmd.p2)
+                        modem_send(message.sender,"ack","setredsig",nil,nil,nil)
+                        
+                    -- Redstone Signal messen
+                    elseif message.cmd.name == "getredsig" then
+                        local redvalue = 0
+                        redvalue = deviceapi.RedGet(message.cmd.p1)
+                        modem_send(message.sender,"repgetredsig",message.cmd.p1,redvalue,nil,nil)
+                    elseif message.cmd.name == "ping" then
+                        modem_send(message.sender,"ack","ping",nil,nil,nil)
+                        modem_send(-1,"attach",os.getComputerID(),os.getComputerLabel(),nil,nil,nil)
+                    elseif message.cmd.name == "swupdate" then
+                        local updtype = message.cmd.p1
+                        local params = {}
+                        params.telegram = updtype
+                       
+                        -- Notwendige Parameter vorhanden?
+                        if updtype then
+                            -- Parameter gueltig?
+                            if updtype == "auto" or updtype == "api" or updtype == "all" then
+                                modem_send(message.sender,"ack",updtype,nil,nil,nil,nil)
+                                modem_send(-1,"deattach",os.getComputerID(),os.getComputerLabel(),nil,nil,nil)
+                                modem.close(modem_channel_r)
+                                os.run(params, "update.lua")
+                            else
+                                modem_send(message.sender,"nack","invalid option",nil,nil,nil,nil)
+                            end
+                        else
+                            modem_send(message.sender,"nack","option missing",nil,nil,nil,nil)
+                        end
+                    end
+                elseif message.dest == tostring(-1) then -- Broadcast, fuer alle Teilnehmer bestimmt
+                    if message.cmd.name == "swupdate" and updates then
+                        local updtype = message.cmd.p1
+                        local params = {}
+                        params.telegram = updtype
+                            
+                        -- Notwendige Parameter vorhanden?
+                        if updtype then
+                            -- Parameter gueltig?
+                            if updtype == "auto" or updtype == "api" or updtype == "all" then
+                                modem_send(message.sender,"ack",updtype,nil,nil,nil,nil)
+                                modem_send(-1,"deattach",os.getComputerID(),os.getComputerLabel(),nil,nil,nil)
+                                modem.close(modem_channel_r)
+                                os.run(params, "update.lua")
+                            else
+                                modem_send(message.sender,"nack","invalid option",nil,nil,nil,nil)
+                            end
+                        else
+                            modem_send(message.sender,"nack","option missing",nil,nil,nil,nil)
+                        end
+                    end
+                end
+            end
+        end
+	end
+    
+    -- Wenn Passthhrough aktiv ist, dann Nachricht uebergeben
+    if passthrough then
+		return message
+	else
+        return nil
+    end
+end
+
+
+function net_ping(sender)
+    modem_send(sender,"ping",nil,nil,nil,nil)
+end
+
+-- Modem Initialisieren
+function open(side, channel_send, channel_receive)
+	modem_channel_r = channel_receive
+	modem_channel_t = channel_send
+	modem_side = side
+	
+	modem = peripheral.wrap(modem_side)
+	modem.open(modem_channel_r)
+    modem_send(-1,"attach",os.getComputerID(),os.getComputerLabel(),nil,nil,nil)
+end
+
+-- Modem schliessen
+function close()
+	modem_send(-1,"deattach",os.getComputerID(),os.getComputerLabel(),nil,nil,nil)
+	modem.close(modem_channel_r)
+end
+
+-- Send Data via Post
+function httppost(url, data)
+    local daten = data
+    local address = url
+    local datastream = nil
+
+    if daten and #daten > 0 then
+        for i=1, #daten do
+            if daten[i].key and daten[i].value then
+                if datastream then
+                    datastream = datastream.."&"
+                else
+                    datastream = ""
+                end
+                datastream = datastream..daten[i].key..'='..textutils.urlEncode(daten[i].value)
+            end
+        end
+        print(datastream)
+        req = http.post(address, datastream)
+        if req then req.close() end
+    end 
+end
+
+-- Send Push Message to Service
+function sendpush(text)
+    local data = {}
+    url = "https://api.pushover.net/1/messages.json"
+    data[1] = {
+        key = "token",
+        value = "aet8jkC9ch78y8RAjNRNbmq5Bmfoqo"
+    }
+    data[2] = {
+        key = "user",
+        value = "uqpU7ZKbxya5LYFQKTr4FjSeRiYQHP"
+    }
+    data[3] = {
+        key = "message",
+        value = text
+    }
+    httppost(url,data)
+end
+-- Generischer Netzwerkdienst
+function NetProcessor()
+	while true do
+		local message = netapi.modem_receive(true,false)
+	end
+end

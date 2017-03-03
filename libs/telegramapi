@@ -1,0 +1,9 @@
+-- ### LUA Telegram API for CC  ### 
+-- ### Version 1.0              ###
+-- ### Autor: NightDragon ###
+
+local version = "1.0"
+
+function apiver()
+	return version
+end
